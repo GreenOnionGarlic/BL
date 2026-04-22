@@ -1,37 +1,7 @@
+import { GoogleGenAI, Type } from "@google/genai";
 import { UserIdentity, PathChoice, SimulationResultData, ChoiceNode, UniversityTier } from "../types";
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-const DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions";
-
-async function callDeepSeekAPI(prompt: string): Promise<string> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "deepseek-chat",
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      response_format: {
-        type: "json_object",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`DeepSeek API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
-}
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function generateNextChoice(
   identity: UserIdentity,
@@ -67,23 +37,39 @@ export async function generateNextChoice(
     6. **多样化分支**：生成选项时，必须确保分支具有显著的多样性（例如：一条稳健路径、一条激进路径、一条基于兴趣的非主流路径、一条基于技能的专业路径），避免选项过于雷同。
     
     必须使用中文生成。
-    输出格式为 JSON，包含以下字段：
-    {
-      "id": "节点ID",
-      "question": "问题描述",
-      "options": [
-        {
-          "id": "选项ID",
-          "label": "选项标签",
-          "description": "选项描述",
-          "consequence": "选项后果"
-        }
-      ]
-    }
+    输出格式为 JSON。
   `;
 
-  const responseText = await callDeepSeekAPI(prompt);
-  return JSON.parse(responseText || "{}") as ChoiceNode;
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          question: { type: Type.STRING },
+          options: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                label: { type: Type.STRING },
+                description: { type: Type.STRING },
+                consequence: { type: Type.STRING },
+              },
+              required: ["id", "label", "description", "consequence"],
+            },
+          },
+        },
+        required: ["id", "question", "options"],
+      },
+    },
+  });
+
+  return JSON.parse(response.text || "{}") as ChoiceNode;
 }
 
 export async function simulateOutcome(
@@ -120,90 +106,169 @@ export async function simulateOutcome(
     9. **提供真实参考数据 (benchmarks)**：基于用户的学校 (${identity.universityName}, ${identity.universityTier}) 和专业 (${identity.major})，提供 2-3 条“真实世界”中同校校友或同专业从业者的参考数据。这些数据应包含他们的职位、工作年限、月薪、所在城市、一段简短的生活/职场感悟以及职业满意度。这有助于用户比对并减轻迷茫。
     
     所有文本内容必须使用中文。
-    输出格式为 JSON，包含以下字段：
-    {
-      "pathName": "路径名称",
-      "incomeRange": [最低月收入, 最高月收入],
-      "dailySchedule": [
-        {
-          "time": "时间点",
-          "activity": "活动名称",
-          "description": "活动细节"
-        }
-      ],
-      "stressIndex": 压力指数,
-      "socialStructure": [
-        {
-          "category": "社交类别",
-          "value": 数值
-        }
-      ],
-      "livingEnvironment": "居住环境描述",
-      "narrative": "核心叙事总结",
-      "sceneType": "场景类型",
-      "evaluatedRisk": "风险评估",
-      "evaluatedStability": "稳定性评估",
-      "stats": {
-        "wealth": 财富值,
-        "health": 健康值,
-        "freedom": 自由度,
-        "growth": 成长值
-      },
-      "yearlyStats": [
-        {
-          "year": 年份,
-          "income": 收入,
-          "wealth": 财富,
-          "health": 健康,
-          "freedom": 自由度,
-          "growth": 成长值,
-          "eventDescription": "事件描述"
-        }
-      ],
-      "choiceHistory": [
-        {
-          "question": "问题",
-          "choiceLabel": "选择标签",
-          "consequence": "后果"
-        }
-      ],
-      "lifeLog": [
-        {
-          "year": 年份,
-          "event": "事件"
-        }
-      ],
-      "suggestions": ["建议1", "建议2"],
-      "benchmarks": [
-        {
-          "role": "职位",
-          "yearsOfExperience": 工作年限,
-          "monthlySalary": 月薪,
-          "location": "所在城市",
-          "lifeExperience": "生活感悟",
-          "satisfaction": 满意度
-        }
-      ]
-    }
+    输出格式为 JSON。
   `;
 
-  const responseText = await callDeepSeekAPI(prompt);
-  const result = JSON.parse(responseText || "{}");
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          pathName: { type: Type.STRING, description: "路径名称，如：大厂螺丝钉的觉醒" },
+          incomeRange: {
+            type: Type.ARRAY,
+            items: { type: Type.NUMBER },
+            description: "月收入区间（单位：千元人民币）",
+          },
+          dailySchedule: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                time: { type: Type.STRING, description: "时间点，如：08:30" },
+                activity: { type: Type.STRING, description: "活动名称，中文" },
+                description: { type: Type.STRING, description: "活动细节描述，中文" },
+              },
+            },
+          },
+          stressIndex: { type: Type.NUMBER },
+          socialStructure: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                category: { type: Type.STRING, description: "社交类别，如：同事、老友、行业人脉" },
+                value: { type: Type.NUMBER },
+              },
+            },
+          },
+          livingEnvironment: { type: Type.STRING, description: "居住环境描述，中文" },
+          narrative: { type: Type.STRING, description: "核心叙事总结，中文" },
+          sceneType: {
+            type: Type.STRING,
+            enum: ["OFFICE", "LIBRARY", "STUDIO", "REMOTE", "FIELD"],
+          },
+          evaluatedRisk: {
+            type: Type.STRING,
+            enum: ["LOW", "MEDIUM", "HIGH"],
+          },
+          evaluatedStability: {
+            type: Type.STRING,
+            enum: ["STABLE", "FLEXIBLE", "DYNAMIC"],
+          },
+          stats: {
+            type: Type.OBJECT,
+            properties: {
+              wealth: { type: Type.NUMBER },
+              health: { type: Type.NUMBER },
+              freedom: { type: Type.NUMBER },
+              growth: { type: Type.NUMBER },
+            },
+            required: ["wealth", "health", "freedom", "growth"],
+          },
+          yearlyStats: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                year: { type: Type.NUMBER },
+                income: { type: Type.NUMBER },
+                wealth: { type: Type.NUMBER },
+                health: { type: Type.NUMBER },
+                freedom: { type: Type.NUMBER },
+                growth: { type: Type.NUMBER },
+                eventDescription: { type: Type.STRING, description: "该年份发生的关键事件或变化原因，中文" },
+              },
+              required: ["year", "income", "wealth", "health", "freedom", "growth"],
+            },
+          },
+          choiceHistory: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                choiceLabel: { type: Type.STRING },
+                consequence: { type: Type.STRING },
+              },
+              required: ["question", "choiceLabel", "consequence"],
+            },
+          },
+          lifeLog: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                year: { type: Type.NUMBER },
+                event: { type: Type.STRING, description: "年度大事记，中文" },
+              },
+            },
+          },
+          suggestions: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "AI 建议，中文",
+          },
+          benchmarks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                role: { type: Type.STRING },
+                yearsOfExperience: { type: Type.NUMBER },
+                monthlySalary: { type: Type.NUMBER },
+                location: { type: Type.STRING },
+                lifeExperience: { type: Type.STRING },
+                satisfaction: { type: Type.NUMBER },
+              },
+              required: ["role", "yearsOfExperience", "monthlySalary", "location", "lifeExperience", "satisfaction"],
+            },
+          },
+        },
+        required: [
+          "pathName",
+          "incomeRange",
+          "dailySchedule",
+          "stressIndex",
+          "socialStructure",
+          "livingEnvironment",
+          "narrative",
+          "sceneType",
+          "evaluatedRisk",
+          "evaluatedStability",
+          "stats",
+          "yearlyStats",
+          "choiceHistory",
+          "lifeLog",
+          "suggestions",
+          "benchmarks",
+        ],
+      },
+    },
+  });
+
+  const result = JSON.parse(response.text || "{}");
   return result as SimulationResultData;
 }
 
 export async function determineUniversityTier(universityName: string): Promise<UniversityTier> {
-  const prompt = `请判断大学 "${universityName}" 的档次。
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `请判断大学 "${universityName}" 的档次。
     规则：
     - 985/C9 高校 -> TOP
     - 211 高校 -> HIGH
     - 普通本科 -> NORMAL
     - 其他/高职 -> OTHER
-    只返回对应的枚举值，不要有其他文字。
-    输出格式为 JSON：{"tier": "枚举值"}`;
+    只返回对应的枚举值，不要有其他文字。`,
+    config: {
+      tools: [{ googleSearch: {} }],
+    },
+  });
 
-  const responseText = await callDeepSeekAPI(prompt);
-  const data = JSON.parse(responseText || "{}");
-  const text = data.tier as UniversityTier;
+  const text = response.text?.trim() as UniversityTier;
   return Object.values(UniversityTier).includes(text) ? text : UniversityTier.NORMAL;
 }
